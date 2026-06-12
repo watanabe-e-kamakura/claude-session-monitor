@@ -12,10 +12,11 @@ try {
   fileConf = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
 } catch { /* 無ければデフォルトで動く */ }
 
-// env > config.json > デフォルト の解決ヘルパー
+// env > config.json > デフォルト の解決ヘルパー。
+// 空文字は「未設定」扱い（install.sh の雛形が "" を書くため。"" がデフォルトを潰すのを防ぐ）
 const pick = (envName, fileKey, dflt) => {
   if (process.env[envName] !== undefined && process.env[envName] !== '') return process.env[envName];
-  if (fileConf[fileKey] !== undefined) return fileConf[fileKey];
+  if (fileConf[fileKey] !== undefined && fileConf[fileKey] !== '') return fileConf[fileKey];
   return dflt;
 };
 const pickNum = (envName, fileKey, dflt) => Number(pick(envName, fileKey, dflt));
