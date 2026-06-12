@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>設定・人格学習 — Claude Session Monitor</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --panel: #ffffff; --panel2: #f0f2f5; --input: #f7f8fa;
+      --border: #e6e8eb; --fg: #1a1d24; --fg-dim: #525a63; --muted: #8b95a1;
+      --accent: #3ea8ff; --accent-2: #2f8fe0; --working: #1faa59; --waiting: #e6492d;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.6 -apple-system, system-ui, "Hiragino Kaku Gothic ProN", sans-serif; background: var(--bg); color: var(--fg); }
+    header { padding: 13px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; background: var(--panel); }
+    header h1 { font-size: 16px; margin: 0; }
+    .back { text-decoration: none; color: var(--accent-2); font-weight: 600; font-size: 13px; border: 1px solid #bcddff; background: #eaf4ff; border-radius: 7px; padding: 6px 12px; }
+    .back:hover { background: #d6ecff; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px 22px; }
+    .section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .section h2 { font-size: 14px; margin: 0 0 12px; color: var(--fg); }
+    .muted { color: var(--muted); }
+    .big { font-size: 26px; font-weight: 800; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+    .stat-box { } .stat-box .label { font-size: 11px; color: var(--muted); }
+    .progress { height: 10px; background: var(--input); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .progress > div { height: 100%; background: var(--accent); }
+    .persona { background: var(--input); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
+    .persona.empty { color: var(--muted); font-style: italic; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+    tr.current { background: #eaf4ff; }
+    .bar { height: 8px; background: var(--accent); border-radius: 999px; display: inline-block; vertical-align: middle; }
+    .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; }
+    .badge.cur { background: #e3f7ec; color: var(--working); }
+    .badge.rb { background: #fdeae6; color: var(--waiting); }
+    button.rollback { background: transparent; border: 1px solid #bcddff; color: var(--accent-2); border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+    button.rollback:hover { background: #eaf4ff; }
+    .empty-note { color: var(--muted); padding: 20px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="back" href="/">← ダッシュボード</a>
+    <h1>⚙ 設定・人格学習</h1>
+  </header>
+
+  <div class="wrap">
+    <div class="section">
+      <h2>学習の状況</h2>
+      <div class="row">
+        <div class="stat-box"><div class="label">現在の人格バージョン</div><div class="big" id="cur-ver">—</div></div>
+        <div class="stat-box"><div class="label">蓄積データ</div><div class="big" id="total">—</div></div>
+        <div class="stat-box" style="flex:1; min-width:200px;">
+          <div class="label">次の自動再学習まで（未学習 <span id="unlearned">0</span> / <span id="threshold">10</span> 件）</div>
+          <div class="progress"><div id="prog" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>現在の人格プロファイル（ドラフト生成に注入中）</h2>
+      <div class="persona empty" id="persona">読み込み中…</div>
+    </div>
+
+    <div class="section">
+      <h2>進化メーター（diff_ratio：草案とあなたの最終版の乖離。低いほど"当たってる"）</h2>
+      <div id="evo"></div>
+    </div>
+
+    <div class="section">
+      <h2>学習履歴・バージョン管理</h2>
+      <div id="history"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function load() {
+      const d = await fetch('/api/learn/status').then((r) => r.json());
+      $('cur-ver').textContent = 'v' + d.currentVersion;
+      $('total').textContent = d.totalRecords + ' 件';
+      $('unlearned').textContent = d.unlearned;
+      $('threshold').textContent = d.threshold;
+      $('prog').style.width = Math.min(100, (d.unlearned / d.threshold) * 100) + '%';
+
+      const p = $('persona');
+      if (d.personaText) { p.textContent = d.personaText; p.classList.remove('empty'); }
+      else { p.textContent = 'まだ学習されていません（v0）。ドラフトを承認/編集していくと、未学習が ' + d.threshold + ' 件たまった時点で自動生成されます。'; p.classList.add('empty'); }
+
+      // 進化メーター（version 別 avgDiff の横バー。低いほど良い）
+      const evo = $('evo');
+      if (!d.versionStats.length) { evo.innerHTML = '<div class="empty-note">まだ送信データがありません。ドラフトを送信すると diff_ratio が記録されます。</div>'; }
+      else {
+        evo.innerHTML = d.versionStats.map((v) => `
+          <div style="display:flex;align-items:center;gap:10px;margin:6px 0;">
+            <span style="width:42px;color:var(--muted);font-size:12px;">v${v.version}</span>
+            <span class="bar" style="width:${Math.round(v.avgDiff * 240)}px;${v.version === d.currentVersion ? '' : 'background:#b8c4cf;'}"></span>
+            <span style="font-size:12px;">${v.avgDiff} <span class="muted">(${v.samples}件)</span></span>
+          </div>`).join('');
+      }
+
+      // 学習履歴テーブル
+      const hist = $('history');
+      const vers = Object.keys(d.meta).map(Number).sort((a, b) => b - a);
+      if (!vers.length) { hist.innerHTML = '<div class="empty-note">まだ再学習は行われていません。</div>'; return; }
+      hist.innerHTML = `<table><thead><tr>
+          <th>版</th><th>作成</th><th>学習ペア</th><th>baseline</th><th>平均diff</th><th>判定</th><th></th>
+        </tr></thead><tbody>${vers.map((v) => {
+          const m = d.meta[v];
+          const isCur = v === d.currentVersion;
+          const rb = m.rolledBackTo != null;
+          return `<tr class="${isCur ? 'current' : ''}">
+            <td>v${v} ${isCur ? '<span class="badge cur">適用中</span>' : ''}</td>
+            <td>${(m.createdAt || '').slice(0, 16).replace('T', ' ')}</td>
+            <td>${m.pairsUsed ?? '—'}</td>
+            <td>v${m.baseline ?? '—'}</td>
+            <td>${m.avgDiffRatio ?? '<span class="muted">測定中</span>'}${m.baselineAvg != null ? ` <span class="muted">(前版 ${m.baselineAvg})</span>` : ''}</td>
+            <td>${rb ? `<span class="badge rb">v${m.rolledBackTo}へ戻した</span>` : (m.evaluated ? '採用' : '<span class="muted">暫定</span>')}</td>
+            <td>${isCur ? '' : `<button class="rollback" onclick="rollback(${v})">この版に戻す</button>`}</td>
+          </tr>`;
+        }).join('')}</tbody></table>`;
+    }
+    async function rollback(v) {
+      if (!confirm('人格を v' + v + ' に戻しますか？')) return;
+      const r = await fetch('/api/learn/rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: v }) });
+      if (!r.ok) { alert((await r.json()).error || '失敗'); return; }
+      load();
+    }
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

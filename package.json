@@ -1,0 +1,13 @@
+{
+  "name": "claude-session-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web dashboard to monitor multiple local Claude Code sessions (progress, jump-to-pane, draft replies, PR review board)",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  }
+}
